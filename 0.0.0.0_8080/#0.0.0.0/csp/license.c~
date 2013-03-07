@@ -1,0 +1,324 @@
+#include "gwan.h"    // G-WAN exported functions
+
+#pragma link "mcrypt"
+#include <mcrypt.h>
+
+#include <math.h>
+#include <stdint.h>
+
+#include <stdio.h>
+#include <stdlib.h>
+#pragma link "crypto"
+
+#include <string.h>
+#include <time.h>
+
+#pragma link "curl"
+#include <curl/curl.h>
+
+// ----------------------------------------------------------------------------
+
+char* concatChar(char* toThis, char* addThis) {
+    char* destination = (char*)malloc( strlen( addThis ) + strlen( toThis ) + 1 );
+    strcpy( destination, toThis );
+    strcat( destination, addThis );
+    return destination;
+}
+
+int encrypt(
+		void* buffer,
+		int buffer_len, /* Because the plaintext could include null bytes*/
+		char* IV,
+		char* key,
+		int key_len
+		) {
+	MCRYPT td = mcrypt_module_open("rijndael-128", NULL, "cbc", NULL);
+	int blocksize = mcrypt_enc_get_block_size(td);
+	if( buffer_len % blocksize != 0 ){return 1;}
+
+	mcrypt_generic_init(td, key, key_len, IV);
+	mcrypt_generic(td, buffer, buffer_len);
+	mcrypt_generic_deinit (td);
+	mcrypt_module_close(td);
+	return 0;
+}
+
+int decrypt(
+		void* buffer,
+		int buffer_len,
+		char* IV,
+		char* key,
+		int key_len
+		) {
+	MCRYPT td = mcrypt_module_open("rijndael-128", NULL, "cbc", NULL);
+	int blocksize = mcrypt_enc_get_block_size(td);
+	if( buffer_len % blocksize != 0 ){return 1;}
+	mcrypt_generic_init(td, key, key_len, IV);
+	mdecrypt_generic(td, buffer, buffer_len);
+	mcrypt_generic_deinit (td);
+	mcrypt_module_close(td);
+	return 0;
+}
+
+void display(char* ciphertext, int len) {
+	int v;
+	for (v=0; v<len; v++){
+		printf("%h", ciphertext[v]);
+	}
+	printf("\n");
+}
+
+char *license = 0;
+size_t writer(char *data, size_t size, size_t nmemb, xbuf_t *xbuf) {
+   if(!xbuf)
+      return 0;
+   int len = size * nmemb;
+   license = data; 
+   return len;
+}
+
+typedef struct {
+	char *buf;
+	int len;
+	int pos;
+} readarg_t;
+
+size_t readcb(void *ptr, size_t size, size_t nitems, void *stream) {
+	readarg_t *rarg = (readarg_t *)stream;
+	int len = rarg->len - rarg->pos;
+	if (len > size * nitems)
+		len = size * nitems;
+	memcpy(ptr, rarg->buf + rarg->pos, len);
+	rarg->pos += len;
+	printf("readcb: %d bytes\n", len);
+	return len;
+}
+
+typedef struct {
+  const char *readptr;
+  long sizeleft;
+} WriteThis;
+ 
+static size_t read_callback(void *ptr, size_t size, size_t nmemb, void *userp) {
+  WriteThis *pooh = (WriteThis *)userp;
+ 
+  if(size*nmemb < 1)
+    return 0;
+ 
+  if(pooh->sizeleft) {
+    *(char *)ptr = pooh->readptr[0]; /* copy one single byte */ 
+    pooh->readptr++;                 /* advance pointer */ 
+    pooh->sizeleft--;
+    printf("Valor %s", pooh->readptr);                /* less data left */ 
+    return 1;                        /* we return 1 byte at a time! */ 
+  }
+ 
+  return 0;                          /* no more data left to deliver */ 
+}
+
+CURLcode http_get(char *url, xbuf_t *xbuf, char* params) {
+
+   CURL *curl = curl_easy_init();
+
+   if ( !curl ) {
+      return 0;
+   }
+
+   curl_easy_setopt(curl, CURLOPT_URL, url);
+   curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0);
+   curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0);
+  //curl_easy_setopt(curl, CURLOPT_HEADER, 1);
+   curl_easy_setopt(curl, CURLOPT_HTTP_TRANSFER_DECODING, 0);
+   curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1);
+   curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 50L);
+   curl_easy_setopt(curl, CURLOPT_POST, 1L);
+   curl_easy_setopt(curl, CURLOPT_POSTFIELDS, params);
+   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writer);
+   curl_easy_setopt(curl, CURLOPT_WRITEDATA, &xbuf);
+  //curl_easy_setopt(curl, CURLOPT_READFUNCTION, read_callback);
+  //curl_easy_setopt(curl, CURLOPT_READDATA, &pooh);
+  //curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+
+   CURLcode result = curl_easy_perform(curl);
+   curl_easy_cleanup(curl);
+   return result;
+}
+
+int main(int argc, char *argv[]) {
+
+   // all the params values
+   char* parameters = 0;
+   char* tmp = 0;
+
+   char *assetid = 0; 
+   get_arg("assetid=", &assetid, argc, argv);
+   parameters = concatChar("assetid=", assetid);
+  
+   char *clientid = 0; 
+   get_arg("clientid=", &clientid, argc, argv);
+   tmp = concatChar("&clientid=", clientid);
+   parameters = concatChar(parameters, tmp);
+  
+   char *divInfo = 0; 
+   get_arg("divInfo=", &divInfo, argc, argv);
+   tmp = concatChar("&divInfo=", divInfo);
+   parameters = concatChar(parameters, tmp);
+  
+   char *keyid = 0; 
+   get_arg("keyid=", &keyid, argc, argv);
+   tmp = concatChar("&keyid=", keyid);
+   parameters = concatChar(parameters, tmp);
+  
+   char *md = 0; 
+   get_arg("md=", &md, argc, argv);
+   tmp = concatChar("&md=", md);
+   parameters = concatChar(parameters, tmp);
+  
+   char *mk = 0; 
+   get_arg("mk=", &mk, argc, argv);
+   tmp = concatChar("&mk=", mk);
+   parameters = concatChar(parameters, tmp);
+  
+   char *playbackmode = 0; 
+   get_arg("playbackmode=", &playbackmode, argc, argv);
+   tmp = concatChar("&playbackmode=", playbackmode);
+   parameters = concatChar(parameters, tmp);
+  
+   char *sessionid = 0; 
+   get_arg("sessionid=", &sessionid, argc, argv);
+   tmp = concatChar("&sessionid=", sessionid);
+   parameters = concatChar(parameters, tmp);
+  
+   char *userdata = 0; 
+   get_arg("userdata=", &userdata, argc, argv);
+   tmp = concatChar("&userdata=", userdata);
+   parameters = concatChar(parameters, tmp);
+  
+   char *ver = 0; 
+   get_arg("ver=", &ver, argc, argv);
+   tmp = concatChar("&ver=", ver);
+   parameters = concatChar(parameters, tmp);
+  
+   char *version = 0; 
+   get_arg("version=", &version, argc, argv);
+   tmp = concatChar("&version=", version);
+   parameters = concatChar(parameters, tmp);
+  
+   char *wvcss = 0; 
+   get_arg("wvcss=", &wvcss, argc, argv);
+   if ( wvcss != NULL ) {
+	   tmp = concatChar("&wvcss=", wvcss);
+	   parameters = concatChar(parameters, tmp);	   
+   }
+
+   char *token = 0; 
+   get_arg("token=", &token, argc, argv);
+   if ( token != NULL ) {
+	   tmp = concatChar("&token=", token);
+	   parameters = concatChar(parameters, tmp);
+   }
+
+   char *messageid = 0; 
+   get_arg("messageid=", &messageid, argc, argv);
+   if ( messageid != NULL ) {
+	   tmp = concatChar("&messageid=", messageid);
+	   parameters = concatChar(parameters, tmp);
+   }
+
+   char *extra = 0; 
+   get_arg("extra=", &extra, argc, argv);
+   if ( extra != NULL ) {
+	   tmp = concatChar("&extra=", extra);
+	   parameters = concatChar(parameters, tmp);
+   }
+   
+   char *time_license = 0; 
+   get_arg("time=", &time_license, argc, argv);
+   if ( time_license != NULL ) {
+	   tmp = concatChar("&time=", time_license);
+	   parameters = concatChar(parameters, tmp);
+   }
+    
+   // Actual time
+   time_t actual_time;
+   actual_time = time(NULL);
+   
+   // Actual time to string
+   char *c_time_string[30];
+   sprintf(c_time_string, "%u", ((unsigned)actual_time));
+
+   char *toSign;
+   get_arg("assetid=", &toSign, argc, argv);
+   get_arg("clientid=", &tmp, argc, argv);
+   toSign = concatChar(toSign, tmp);
+   get_arg("mk=", &tmp, argc, argv);
+   toSign = concatChar(toSign, tmp);   
+   get_arg("md=", &tmp, argc, argv);
+   toSign = concatChar(toSign, tmp);
+   toSign = concatChar(toSign, c_time_string);
+   printf("To Sign: %s\n", toSign);
+   // Hashing
+   unsigned char hash[strlen(toSign) + 1];
+   SHA1(toSign, strlen(toSign), hash);
+
+   printf("Sign: %s\n", hash);
+   display(hash, strlen(hash));
+    
+   char* IV = "2d177a67960da95030d7326686d1d4ca";
+   char* key = "bb8a2d02a5a55122d5da5681a04ca5cd2d300ec33eb72437681f9d00ba4b9386";
+   int keysize = 32; /* 128 bits */
+   char* encrypted_text;
+   int buffer_len = 32;
+
+   aes_t *ctx;
+   int mode = 1;
+   int g_key = { 0xbb, 0x8a, 0x2d, 0x02, 0xa5, 0xa5, 0x51, 0x22, 0xd5, 0xda, 0x56, 0x81, 0xa0, 0x4c, 0xa5, 0xcd, 0x2d, 0x30, 0x0e, 0xc3, 0x3e, 0xb7, 0x24, 0x37, 0x68, 0x1f, 0x9d, 0x00, 0xba, 0x4b, 0x93, 0x86 };
+   u32 keylen;
+   int *iv =  { 0x2d, 0x17, 0x7a, 0x67, 0x96, 0x0d, 0xa9, 0x50, 0x30, 0xd7, 0x32, 0x66, 0x86, 0xd1, 0xd4, 0xca };
+   int *src;
+   int *dst;
+   aes_init(ctx, mode, g_key, keylen);
+   aes_enc(ctx, mode, keylen, iv, toSign, dst);
+   printf("DEST: %s\n", dst);
+  
+   encrypted_text = calloc(1, buffer_len);
+   strncpy(encrypted_text, hash, buffer_len);
+   encrypt(encrypted_text, buffer_len, IV, key, keysize);
+   
+   unsigned char sign[strlen(encrypted_text) + 1];
+   s_snprintf(sign, 255, "%B", encrypted_text);
+   printf("Base64 Sig: %s\n", sign);
+
+   tmp = concatChar("&sign=", sign);
+   parameters = concatChar(parameters, tmp);
+   tmp = concatChar("&ptime=", c_time_string);
+   parameters = concatChar(parameters, tmp);
+   
+   //"&setduration="
+   
+   char *url = "https://staging.shibboleth.tv/widevine/cypherpc/cgi-bin/GetEMMs.cgi";
+   //char *url = "https://fcpstage.shibboleth.tv/widevine/cypherpc/cgi-bin/GetEMMs.cgi";
+   xbuf_t *reply = get_reply(argv), xbuf;
+   xbuf_init(&xbuf);
+   
+   printf("Params: %s\n", parameters);
+   if (http_get(url, &xbuf, parameters) != CURLE_OK ) {
+      xbuf_cat(reply, "Server or resource not available");
+      printf("ERROR: %s\n", xbuf); 
+   } else {
+      printf("License: %s\n", license);
+   }
+
+   
+   xbuf_ncat(get_reply(argv), license, strlen(license));
+   
+   free(parameters);
+   xbuf_free(&xbuf);   
+   
+   return 200; // return an HTTP code (200:'OK')
+}
+ 
+// ============================================================================
+// End of Source Code
+// ============================================================================
+
