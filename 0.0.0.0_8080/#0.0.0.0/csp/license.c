@@ -217,6 +217,10 @@ int main(int argc, char *argv[]) {
 	parameters = concatChar(parameters, tmp);
 	tmp = concatChar("&setpolicy=", "mobile");
 	parameters = concatChar(parameters, tmp);
+	// To base 64
+	char *usageurl = "http://development-lgtv.wuaki.tv/license_notification";
+	tmp = concatChar("&usageurl=", usageurl);
+	parameters = concatChar(parameters, tmp);
 
 	tmp = concatChar("&sign=", sign);
 	parameters = concatChar(parameters, tmp);
@@ -239,10 +243,8 @@ int main(int argc, char *argv[]) {
 
 	xbuf_ncat(get_reply(argv), license, strlen(license));
 
-	free(parameters);
-	free(tmp);
-	if ( assetid != NULL ) free(assetid);
-	/*if ( clientid != NULL ) free(clientid);
+	/*if ( assetid != NULL ) free(assetid);
+	if ( clientid != NULL ) free(clientid);
 	if ( divInfo != NULL ) free(divInfo);
 	if ( keyid != NULL ) free(keyid);
 	if ( md != NULL ) free(md);
@@ -256,9 +258,18 @@ int main(int argc, char *argv[]) {
 	if ( wvcss != NULL ) free(wvcss);
 	if ( messageid != NULL ) free(messageid);
 	if ( extra != NULL ) free(extra);
-	if ( time_license != NULL ) free(time_license);*/
+	if ( time_license != NULL ) free(time_license);
+	if ( license != NULL ) free(license);
+	if ( actual_time != NULL ) free(actual_time);
+	*/
 
-	xbuf_free(&xbuf);
+	if ( encrypted_text != NULL ) free(encrypted_text);
+	if ( hash != NULL ) free(hash);
+	if ( toSign != NULL ) free(toSign);
+	if ( c_time_string != NULL ) free(c_time_string);
+	if ( parameters != NULL ) free(parameters);
+	if ( tmp != NULL ) free(tmp);
+	if ( &xbuf != NULL ) xbuf_free(&xbuf);
 
 	return 200; // return an HTTP code (200:'OK')
 }
