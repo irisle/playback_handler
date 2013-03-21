@@ -7,11 +7,10 @@
 #include <openssl/evp.h>
 
 #include <math.h>
-#include <stdint.h>
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#pragma link "crypto"
 
 #include <string.h>
 #include <time.h>
@@ -67,6 +66,8 @@ CURLcode http_get(char *url, xbuf_t *xbuf, char* params) {
 }
 
 int main(int argc, char *argv[]) {
+
+	u32   method   = (u32)  get_env(argv, REQUEST_METHOD);
 
 	// all the params values
 	char* parameters = 0;
@@ -162,32 +163,19 @@ int main(int argc, char *argv[]) {
 		parameters = concatChar(parameters, tmp);
 	}
 
-	// Actual time
+	int try = 10;
+	int count = 0;
+
 	time_t actual_time;
-	actual_time = time(NULL);
-
-	// Actual time to string
 	char *c_time_string[11];
-	sprintf(c_time_string, "%u", ((unsigned)actual_time));
-
 	unsigned char *toSign;
-	get_arg("assetid=", &toSign, argc, argv);
-	get_arg("clientid=", &tmp, argc, argv);
-	toSign = concatChar(toSign, tmp);
-	get_arg("mk=", &tmp, argc, argv);
-	toSign = concatChar(toSign, tmp);
-	get_arg("md=", &tmp, argc, argv);
-	toSign = concatChar(toSign, tmp);
-	toSign = concatChar(toSign, c_time_string);
-	printf("To Sign: %s\n", toSign);
-
-	// Hashing
-	unsigned char *hash = malloc(SHA_DIGEST_LENGTH);
-	SHA1(toSign, strlen(toSign), hash);
+	unsigned char *hash;
+	char* encrypted_text;
+	xbuf_t xbuf;
 
 	int iv[] = {45, 23, 122, 103, 150, 13, 169, 80, 48, 215, 50, 102, 134, 209, 212, 202};// 2d177a67960da95030d7326686d1d4ca
 	int key[] = {187, 138, 45, 2, 165, 165, 81, 34, 213, 218, 86, 129, 160, 76, 165, 205, // bb8a2d02a5a55122d5da5681a04ca5cd2d300ec33eb72437681f9d00ba4b9386
-			45, 48, 14, 195, 62, 183, 36, 55, 104, 31, 157, 0, 186, 75, 147, 134};
+					45, 48, 14, 195, 62, 183, 36, 55, 104, 31, 157, 0, 186, 75, 147, 134};
 
 	int iv_len = sizeof(iv)/sizeof(int);
 	int key_len = sizeof(key)/sizeof(int);
@@ -202,43 +190,101 @@ int main(int argc, char *argv[]) {
 	}
 
 	// Sign process
-	char* encrypted_text;
 	EVP_CIPHER_CTX en, de;
-	int len = (strlen(hash));
 	aes_initialize_own(&en, &de, iv_binary, key_binary);
-	encrypted_text = aes_encrypt(&en, hash, &len);
 
-	// To base 64
-	char sign[45];
-	s_snprintf(sign, 255, "%B", encrypted_text);
-	printf("Base64 Sig: %s\n", sign);
+	// To try call "int try" times to obtain the license
+	while ( count < try ) {
 
-	tmp = concatChar("&setduration=", "3600");
-	parameters = concatChar(parameters, tmp);
-	tmp = concatChar("&setpolicy=", "mobile");
-	parameters = concatChar(parameters, tmp);
-	// To base 64
-	char *usageurl = "http://development-lgtv.wuaki.tv/license_notification";
-	tmp = concatChar("&usageurl=", usageurl);
-	parameters = concatChar(parameters, tmp);
+		// Actual time
+		actual_time = time(NULL);
 
-	tmp = concatChar("&sign=", sign);
-	parameters = concatChar(parameters, tmp);
-	tmp = concatChar("&ptime=", c_time_string);
-	parameters = concatChar(parameters, tmp);
+		// Actual time to string
+		sprintf(c_time_string, "%u", ((unsigned)actual_time));
 
-	//char *url = "https://staging.shibboleth.tv/widevine/cypherpc/cgi-bin/GetEMMs.cgi";
-	char *url = "https://fcpstage.shibboleth.tv/widevine/cypherpc/cgi-bin/GetEMMs.cgi";
-	xbuf_t *reply = get_reply(argv), xbuf;
-	xbuf_init(&xbuf);
+		char *assetid_tmp;
+		char *client_tmp;
+		char *mk_tmp;
+		char *md_tmp;
 
-	printf("Params: %s\n", parameters);
+		get_arg("assetid=", &assetid_tmp, argc, argv);
+		get_arg("clientid=", &client_tmp, argc, argv);
+		toSign = concatChar(assetid_tmp, client_tmp);
+		get_arg("mk=", &mk_tmp, argc, argv);
+		toSign = concatChar(toSign, mk_tmp);
+		get_arg("md=", &md_tmp, argc, argv);
+		toSign = concatChar(toSign, md_tmp);
+		toSign = concatChar(toSign, c_time_string);
+		printf("To Sign: %s\n", toSign);
 
-	if (http_get(url, &xbuf, parameters) != CURLE_OK ) {
-		xbuf_cat(reply, "Server or resource not available");
-		printf("ERROR: %s\n", xbuf);
-	} else {
-		printf("License: %s\n", license);
+		// Hashing
+		hash = malloc(SHA_DIGEST_LENGTH);
+		SHA1(toSign, strlen(toSign), hash);
+
+		int len = (strlen(hash));
+		encrypted_text = aes_encrypt(&en, hash, &len);
+
+		// Calculate the sign size
+		unsigned int input_size = sizeof(encrypted_text);
+		unsigned int adjustment = ( (input_size % 3) ? (3 - (input_size % 3)) : 0);
+		unsigned int code_padded_size = ( (input_size + adjustment) / 3) * 4;
+		unsigned int newline_size = ((code_padded_size) / 72) * 2;
+		unsigned int total_size = code_padded_size + newline_size;
+
+		// To base 64
+		char sign[total_size];
+		s_snprintf(sign, 255, "%B", encrypted_text);
+		printf("Base64 Sig: %s\n", sign);
+		printf("Base64 len: %d size:\n", strlen(sign), sizeof(sign));
+
+		char *duration_tmp;
+		char *policy_tmp;
+		char *usageurl_tmp;
+		char *sign_tmp;
+		char *time_tmp;
+		char *internal_parameters;
+
+		duration_tmp = "&setduration=3600";
+		policy_tmp = "&setpolicy=mobile";
+		internal_parameters = concatChar(duration_tmp, policy_tmp);
+
+		char *usageurl = "http://development-lgtv.wuaki.tv/license_notification";
+		// To base 64
+		// TODO: Make here the same sign size calculation
+		char usage_base64_url[72]; // aHR0cDovL2RldmVsb3BtZW50LWxndHYud3Vha2kudHYvbGljZW5zZV9ub3RpZmljYXRpb24=
+		s_snprintf(usage_base64_url, 255, "%B", usageurl);
+
+		usageurl_tmp = concatChar("&usageurl=", usage_base64_url);
+		internal_parameters = concatChar(internal_parameters, usageurl_tmp);
+
+		sign_tmp = concatChar("&sign=", sign);
+		internal_parameters = concatChar(internal_parameters, sign_tmp);
+		time_tmp = concatChar("&ptime=", c_time_string);
+		internal_parameters = concatChar(internal_parameters, time_tmp);
+
+		char *url = "https://fcpstage.shibboleth.tv/widevine/cypherpc/cgi-bin/GetEMMs.cgi";
+		xbuf_t *reply = get_reply(argv);
+		xbuf_init(&xbuf);
+
+		char *concat_params = concatChar(parameters, internal_parameters);
+
+		printf("Params: %s\n", concat_params);
+		printf("Calling... %d %s\n", count, url);
+
+		if (http_get(url, &xbuf, concat_params) != CURLE_OK ) {
+			xbuf_cat(reply, "Server or resource not available");
+			printf("ERROR: %s\n", xbuf);
+		} else {
+			// Empiric
+			if ( license != NULL && strlen(license) < 20 ) {
+				printf("INVALID License: %s\n", license);
+			} else {
+				printf("License: %s\n", license);
+				break;
+			}
+		}
+
+		count++;
 	}
 
 	xbuf_ncat(get_reply(argv), license, strlen(license));
@@ -275,6 +321,7 @@ int main(int argc, char *argv[]) {
 }
 
 
+//char *url = "https://staging.shibboleth.tv/widevine/cypherpc/cgi-bin/GetEMMs.cgi";
 
 //int keysize = 32; /* 256 bits */
 /*int buffer_len = 32;
